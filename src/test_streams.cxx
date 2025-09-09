@@ -48,7 +48,17 @@ void server(zmq::context_t& context, std::string connection_string, int port = 0
   }
 }
 
-void client(zmq::context_t& context, std::string connection_string, int length, int num) {
+void kill_server(std::string connection_string) {
+  zmq::context_t context{1};
+  // construct a REQ (request) socket and connect to interface
+  zmq::socket_t socket{context, zmq::socket_type::req};
+  socket.connect(connection_string);
+  std::vector<float> zero = {};
+  auto zero_data = std::make_unique<zmq::message_t>(zero);
+  socket.send(*zero_data, zmq::send_flags::none);
+}
+
+void client(zmq::context_t& context, std::string connection_string, int length, int num, bool __kill = false) {
   // construct a REQ (request) socket and connect to interface
   zmq::socket_t socket{context, zmq::socket_type::req};
   socket.connect(connection_string);
@@ -57,25 +67,23 @@ void client(zmq::context_t& context, std::string connection_string, int length, 
   std::vector<float> times = {};
 
   for (auto request_num = 0; request_num < num; ++request_num) {
-    const auto p1 = std::chrono::system_clock::now();
+    const auto p1 = std::chrono::high_resolution_clock::now();
     auto start = std::chrono::duration_cast<std::chrono::nanoseconds>(p1.time_since_epoch()).count();
-    auto msg_data = std::make_unique<zmq::message_t>(vec_data);
 
+    auto msg_data = std::make_unique<zmq::message_t>(vec_data);
     socket.send(*msg_data, zmq::send_flags::none);
 
     auto reply = std::make_unique<zmq::message_t>();
     auto out = socket.recv(*reply, zmq::recv_flags::none);
 
-    const auto p2 = std::chrono::system_clock::now();
+    const auto p2 = std::chrono::high_resolution_clock::now();
     auto end = std::chrono::duration_cast<std::chrono::nanoseconds>(p2.time_since_epoch()).count();
     std::chrono::duration<double, std::nano> nano_duration(end - start);
     auto seconds_duration = std::chrono::duration_cast<std::chrono::duration<double>>(nano_duration);
     times.push_back(seconds_duration.count());
   }
 
-  std::vector<float> zero = {};
-  auto zero_data = std::make_unique<zmq::message_t>(zero);
-  socket.send(*zero_data, zmq::send_flags::none);
+  if (__kill) kill_server(connection_string);
 
   auto sum = std::accumulate(times.begin(), times.end(), 0.0);
   auto avg = sum / float(times.size());
@@ -95,6 +103,8 @@ int main(int argc, char** argv) {
 
   bool run_server = false;
   bool run_client = false;
+  bool one_shot = false;
+  bool _kill_server = false;
 
   // For TCP connections
   std::string host = "localhost";
@@ -115,6 +125,8 @@ int main(int argc, char** argv) {
        clipp::option("-h", "--host") & clipp::value("host", host).doc("Host for connecting with tcp"),
        clipp::option("-s", "--server").set(run_server, true).doc("run in server mode, cannot be used with \"inproc\""),
        clipp::option("-c", "--client").set(run_client, true).doc("run in client mode, cannot be used with \"inproc\""),
+       clipp::option("-o", "--oneshot").set(one_shot, true).doc("Run client once and kill server"),
+       clipp::option("-k", "--kill").set(_kill_server, true).doc("Kill the server"),
        clipp::option("-n", "--num") & clipp::value("num", num).doc("Number of messages to pass between processes"),
        clipp::option("-l", "--length") &
            clipp::value("length", length).doc("Length of a single message vector to pass"));
@@ -139,16 +151,19 @@ int main(int argc, char** argv) {
   }
 
   // initialize the zmq context with a single IO thread
-  zmq::context_t context{1};
-  if (run_server) {
+  zmq::context_t context{static_cast<int>(std::thread::hardware_concurrency())};
+  if (_kill_server) {
+    fmt::println("Killing server at {}", connection_string);
+    kill_server(connection_string);
+  } else if (run_server) {
     std::thread server_thread(server, std::ref(context), connection_string, port);
     server_thread.join();
   } else if (run_client) {
-    std::thread client_thread(client, std::ref(context), connection_string, length, num);
+    std::thread client_thread(client, std::ref(context), connection_string, length, num, one_shot);
     client_thread.join();
   } else {
     std::thread server_thread(server, std::ref(context), connection_string, port);
-    std::thread client_thread(client, std::ref(context), connection_string, length, num);
+    std::thread client_thread(client, std::ref(context), connection_string, length, num, one_shot);
     client_thread.join();
     server_thread.join();
   }
