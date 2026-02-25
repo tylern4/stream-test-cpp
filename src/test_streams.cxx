@@ -28,6 +28,16 @@ size_t vector_size(const typename std::vector<T>& vec) {
   return sizeof(T) * vec.size();
 }
 
+void printer() {
+  char spinner[] = {'|', '/', '-', '\\'};
+  int i = 0;
+  for (;;) {
+    fmt::print(" Server Running {}\r", spinner[i++ % 4]);
+    std::cout.flush();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+}
+
 void server(zmq::context_t& context, std::string connection_string, int port = 0) {
   if (port > 0) {
     connection_string = fmt::format("tcp://*:{}", port);
@@ -140,14 +150,13 @@ int main(int argc, char** argv) {
 
   if (use_ipc) {
     connection_string = ipc_string;
-    // fmt::println("Using ipc {}", connection_string);
+    fmt::println("Using ipc {}", connection_string);
   } else if (use_inproc) {
     connection_string = inproc_string;
-    // fmt::println("Using inproc {}", connection_string);
+    fmt::println("Using inproc {}", connection_string);
   } else {
     port = (port == 0) ? 5555 : port;
     connection_string = fmt::format("tcp://{}:{}", host, port);
-    // fmt::println("Using TCP {}", connection_string);
   }
 
   // initialize the zmq context with a single IO thread
@@ -156,8 +165,11 @@ int main(int argc, char** argv) {
     fmt::println("Killing server at {}", connection_string);
     kill_server(connection_string);
   } else if (run_server) {
+    fmt::println("TCP Server at {}", connection_string);
     std::thread server_thread(server, std::ref(context), connection_string, port);
+    std::thread p(printer);
     server_thread.join();
+    p.detach();
   } else if (run_client) {
     std::thread client_thread(client, std::ref(context), connection_string, length, num, one_shot);
     client_thread.join();
