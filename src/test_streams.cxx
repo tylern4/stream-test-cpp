@@ -15,6 +15,8 @@
 
 #define __size__ double
 
+bool active = false;
+
 template <typename T>
 std::vector<T> gen_random_vec(size_t length = 10000) {
   std::random_device rd;
@@ -35,7 +37,11 @@ void printer() {
   char spinner[] = {'|', '/', '-', '\\'};
   int i = 0;
   for (;;) {
-    fmt::print(fg(fmt::color::blue_violet), " Server Running {}\r", spinner[i++ % 4]);
+    if (active) {
+      fmt::print(fg(fmt::color::green_yellow), " Someone connected! {}\r", spinner[i++ % 4]);
+    } else {
+      fmt::print(fg(fmt::color::blue_violet), " Server Running {}\r", spinner[i++ % 4]);
+    }
     std::cout.flush();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
@@ -53,6 +59,7 @@ void server(zmq::context_t& context, std::string connection_string, int port = 0
 
   for (;;) {
     auto out = socket.recv(*msg_data, zmq::recv_flags::none);
+    active = true;
     // Check if we should stop the server by sending a zero vector
     auto x = msg_data.get()->size();
     if (x == 0) return;
