@@ -12,6 +12,8 @@
 #include <fmt/core.h>
 #include "clipp.h"
 
+#define __size__ double
+
 template <typename T>
 std::vector<T> gen_random_vec(size_t length = 10000) {
   std::random_device rd;
@@ -63,7 +65,7 @@ void kill_server(std::string connection_string) {
   // construct a REQ (request) socket and connect to interface
   zmq::socket_t socket{context, zmq::socket_type::req};
   socket.connect(connection_string);
-  std::vector<float> zero = {};
+  std::vector<__size__> zero = {};
   auto zero_data = std::make_unique<zmq::message_t>(zero);
   socket.send(*zero_data, zmq::send_flags::none);
 }
@@ -73,7 +75,7 @@ void client(zmq::context_t& context, std::string connection_string, int length, 
   zmq::socket_t socket{context, zmq::socket_type::req};
   socket.connect(connection_string);
 
-  auto vec_data = gen_random_vec<float>(length);
+  auto vec_data = gen_random_vec<__size__>(length);
   std::vector<float> times = {};
 
   for (auto request_num = 0; request_num < num; ++request_num) {
