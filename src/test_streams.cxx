@@ -9,6 +9,7 @@
 #include <zmq.hpp>
 
 // Optional - for formatting text and getting input
+#include <fmt/color.h>
 #include <fmt/core.h>
 #include "clipp.h"
 
@@ -34,7 +35,7 @@ void printer() {
   char spinner[] = {'|', '/', '-', '\\'};
   int i = 0;
   for (;;) {
-    fmt::print(" Server Running {}\r", spinner[i++ % 4]);
+    fmt::print(fg(fmt::color::blue_violet), " Server Running {}\r", spinner[i++ % 4]);
     std::cout.flush();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
