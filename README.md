@@ -30,6 +30,10 @@ OPTIONS
         -c, --client
                     run in client mode, cannot be used with "inproc"
 
-        <num>       Number of messages to pass between processes
-        <length>    Length of a single message vector to pass
+        <num>       Comma-separated list of message counts (e.g. 100,1000,10000)
+        <length>    Comma-separated list of message vector lengths (e.g. 100,1000,10000)
+
+The client runs every length x num combination in a loop, prints progress
+(`[i/total]`) and reports round-trip time plus estimated MB/s for each test.
+Pass `-o` to kill the server after all tests complete.
 ```
