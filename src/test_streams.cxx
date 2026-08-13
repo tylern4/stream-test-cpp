@@ -1,5 +1,8 @@
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <deque>
 #include <iostream>
 #include <numeric>
 #include <random>
@@ -16,7 +19,16 @@
 
 #define __size__ double
 
-bool active = false;
+struct ServerStats {
+  std::atomic<bool> active{false};
+  std::atomic<size_t> bytes{0};
+};
+
+int64_t now_ns() {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
 
 template <typename T>
 std::vector<T> gen_random_vec(size_t length = 10000) {
@@ -44,12 +56,25 @@ std::vector<long> parse_list(const std::string& s) {
   return out;
 }
 
-void printer() {
+void printer(ServerStats& stats) {
   char spinner[] = {'|', '/', '-', '\\'};
   int i = 0;
+  std::deque<std::pair<int64_t, size_t>> samples;
   for (;;) {
-    if (active) {
-      fmt::print(fg(fmt::color::green_yellow), " Someone connected! {}\r", spinner[i++ % 4]);
+    const int64_t now = now_ns();
+    const size_t bytes = stats.bytes.load(std::memory_order_relaxed);
+    samples.push_back({now, bytes});
+    while (samples.size() > 1 && now - samples.front().first > 1000000000LL) {
+      samples.pop_front();
+    }
+    double mbps = 0.0;
+    if (samples.size() > 1) {
+      const auto& oldest = samples.front();
+      double elapsed = (now - oldest.first) / 1e9;
+      mbps = elapsed > 0.0 ? (bytes - oldest.second) / elapsed / 1e6 : 0.0;
+    }
+    if (stats.active.load(std::memory_order_relaxed)) {
+      fmt::print(fg(fmt::color::green_yellow), " Someone connected! {} MB/s: {:.2f}      \r", spinner[i++ % 4], mbps);
     } else {
       fmt::print(fg(fmt::color::blue_violet), " Server Running {}\r", spinner[i++ % 4]);
     }
@@ -58,7 +83,7 @@ void printer() {
   }
 }
 
-void server(zmq::context_t& context, std::string connection_string, int port = 0) {
+void server(zmq::context_t& context, std::string connection_string, int port, ServerStats& stats) {
   if (port > 0) {
     connection_string = fmt::format("tcp://*:{}", port);
   }
@@ -70,10 +95,11 @@ void server(zmq::context_t& context, std::string connection_string, int port = 0
 
   for (;;) {
     auto out = socket.recv(*msg_data, zmq::recv_flags::none);
-    active = true;
+    stats.active.store(true, std::memory_order_relaxed);
     // Check if we should stop the server by sending a zero vector
     auto x = msg_data.get()->size();
     if (x == 0) return;
+    stats.bytes.fetch_add(x, std::memory_order_relaxed);
     // Do something with the data here
     socket.send(*msg_data, zmq::send_flags::none);
   }
@@ -219,22 +245,26 @@ int main(int argc, char** argv) {
   if (lengths.empty()) lengths.push_back(1000);
   if (nums.empty()) nums.push_back(1000);
 
+  ServerStats stats;
+
   if (_kill_server) {
     fmt::println("Killing server at {}", connection_string);
     kill_server(connection_string);
   } else if (run_server) {
     fmt::println("TCP Server at {}", connection_string);
-    std::thread server_thread(server, std::ref(context), connection_string, port);
-    std::thread p(printer);
+    std::thread server_thread(server, std::ref(context), connection_string, port, std::ref(stats));
+    std::thread p(printer, std::ref(stats));
     server_thread.join();
     p.detach();
   } else if (run_client) {
     run_client_tests(context, connection_string, lengths, nums, one_shot);
   } else {
-    std::thread server_thread(server, std::ref(context), connection_string, port);
+    std::thread server_thread(server, std::ref(context), connection_string, port, std::ref(stats));
+    std::thread p(printer, std::ref(stats));
     std::thread client_thread(run_client_tests, std::ref(context), connection_string, lengths, nums, one_shot);
     client_thread.join();
     server_thread.join();
+    p.detach();
   }
 
   /* code */
